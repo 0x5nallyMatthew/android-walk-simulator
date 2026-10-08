@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Walk Simulator — Android Demo</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --bg: #f2f2f7; --card: #fff; --text: #1c1c1e; --muted: #8e8e93;
+    --blue: #0a84ff; --green: #30d158; --red: #ff453a; --border: #e5e5ea;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 20px 14px 60px; }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 21px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+  #map { height: 430px; border-radius: 14px; border: 1px solid var(--border); box-shadow: 0 1px 4px rgba(0,0,0,.08); z-index: 0; }
+  .map-error { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--muted); font-size: 14px; padding: 20px; text-align: center; }
+  .card { background: var(--card); border-radius: 14px; padding: 14px 16px; margin-top: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .card h2 { font-size: 13px; margin: 0 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .hint { font-size: 12.5px; color: var(--muted); margin: 6px 0 10px; }
+  label { font-size: 13px; color: var(--muted); display: block; margin-bottom: 4px; }
+  input[type=range] { width: 100%; accent-color: var(--blue); }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .row > .grow { flex: 1; min-width: 220px; }
+  select { padding: 8px 10px; font-size: 14px; border-radius: 10px; border: 1px solid var(--border); background: #fff; }
+  .btn { padding: 12px 18px; font-size: 15px; font-weight: 600; border-radius: 12px; border: none; cursor: pointer; }
+  .btn-start { background: var(--green); color: #fff; }
+  .btn-stop { background: var(--red); color: #fff; }
+  .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); font-weight: 500; }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 12px; }
+  .stat { background: #f7f7fa; border-radius: 10px; padding: 10px 12px; }
+  .stat .v { font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .stat .k { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .stat .v.ok { color: var(--green); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  .empty { color: var(--muted); font-size: 13px; text-align: center; padding: 14px 0; }
+  .note { font-size: 12px; color: var(--muted); line-height: 1.55; }
+  code { background: #f0f0f5; padding: 1px 5px; border-radius: 5px; font-size: 11.5px; }
+  .checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-top: 6px; }
+  .wp-pin-dot {
+    width: 26px; height: 26px; border-radius: 50%; background: var(--blue);
+    border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 12px; font-weight: 700; cursor: grab;
+  }
+  .wp-pin-dot:active { cursor: grabbing; }
+  .leaflet-marker-icon:hover .wp-pin-dot { transform: scale(1.12); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🤖 Walk Simulator — Android Demo</h1>
+  <div class="sub">Mô phỏng UI màn hình chính của app Android: chạm bản đồ chọn điểm → tự động tìm đường đi bộ (OSRM foot profile) → đi theo đường phố ở tốc độ đã chọn. Trên Android thật, mỗi vị trí được đẩy vào GPS hệ thống (mock location) và số bước ghi vào Health Connect.</div>
+
+  <div id="map"><div class="map-error">Đang tải bản đồ OpenStreetMap… (cần internet)</div></div>
+
+  <div class="card">
+    <h2>Chọn lộ trình</h2>
+    <div class="hint">👆 Chạm/<b>click</b> bản đồ để thêm điểm đến — tự động tìm <b>đường đi bộ</b> qua đường phố (OSRM, không đi xuyên hồ/sông). Chuột phải hoặc nút "Xóa điểm cuối" để xóa. Cần tối thiểu 2 điểm.</div>
+    <div class="row">
+      <button class="btn btn-ghost" id="btn-undo">↩ Xóa điểm cuối</button>
+      <button class="btn btn-ghost" id="btn-clear">🗑 Xóa hết</button>
+      <span id="wp-count" style="color:var(--muted);font-size:13px">0 điểm</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Điều khiển phiên đi bộ</h2>
+    <div class="row">
+      <div class="grow">
+        <label>Tốc độ đi: <b id="v-speed">5.0</b> km/h</label>
+        <input type="range" id="s-speed" min="1" max="10" step="0.5" value="5">
+      </div>
+      <div class="grow">
+        <label>Thời gian: <b id="v-dur">30</b> phút</label>
+        <input type="range" id="s-dur" min="5" max="240" step="5" value="30">
+      </div>
+      <div>
+        <label>Tốc độ demo (test)</label>
+        <select id="s-mult">
+          <option value="1" selected>1× thực tế</option>
+          <option value="10">10×</option>
+          <option value="60">60×</option>
+        </select>
+      </div>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="s-loop" checked>
+      <label for="s-loop" style="margin:0">Lặp lộ trình khi đi hết</label>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn btn-start" id="btn-start">▶ Bắt đầu</button>
+      <button class="btn btn-stop" id="btn-stop" disabled>■ Dừng</button>
+    </div>
+    <div class="hint" id="v-status" style="margin-top:8px">Sẵn sàng — chọn ít nhất 2 điểm trên bản đồ</div>
+
+    <div class="stats">
+      <div class="stat"><div class="v" id="st-time">00:00</div><div class="k">Thời gian (mô phỏng)</div></div>
+      <div class="stat"><div class="v" id="st-dist">0 m</div><div class="k">Đã đi</div></div>
+      <div class="stat"><div class="v" id="st-steps">0</div><div class="k">Số bước (÷0.72m)</div></div>
+      <div class="stat"><div class="v ok" id="st-loc">—</div><div class="k">Vị trí đẩy vào GPS (mock)</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Lần ghi Health Connect (lô mỗi phút mô phỏng)</h2>
+    <div id="batch-wrap"><div class="empty">Chưa có lần ghi nào</div></div>
+  </div>
+
+  <div class="card note">
+    <b>Khác biệt so với bản web iOS:</b> trên Android thật, vị trí ở ô "Vị trí đẩy vào GPS" được gọi
+    <code>LocationManager.setTestProviderLocation()</code> <b>mỗi giây</b> — mọi app khác đọc được ngay
+    (iOS không làm được). Lưu ý: Android đánh dấu cờ <code>Location.isMock()</code> nên app kiểm tra
+    kỹ vẫn phát hiện được vị trí giả.
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+"use strict";
+if (typeof L === "undefined") {
+  document.getElementById("map").innerHTML =
+    '<div class="map-error">⚠ Không tải được thư viện bản đồ (Leaflet CDN) — kiểm tra kết nối internet rồi tải lại trang.</div>';
+} else {
+initDemo();
+}
+
+function initDemo() {
+  // ===== Bản đồ =====
+  const map = L.map("map").setView([21.0285, 105.8542], 15);
+  // tile.openstreetmap.org & carto đòi key trong một số mạng → dùng mirror OSM France (miễn phí, không key)
+  L.tileLayer("https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png", {
+    maxZoom: 20,
+    subdomains: "abc",
+    attribution: "© OpenStreetMap © OpenStreetMap.fr"
+  }).addTo(map);
+
+  const markersLayer = L.layerGroup().addTo(map);
+  let plannedLine = null;   // lộ trình kế hoạch (đứt nét xanh)
+  let walkedLine = null;    // phần đã đi (đỏ)
+  let walker = null;        // marker vị trí hiện tại
+
+  let waypoints = [];
+  let streetRoute = null;   // tuyến đường bộ (OSRM) — dùng làm lộ trình đi nếu có
+  let routeDistance = 0;    // tổng quãng đường của tuyến streetRoute (mét)
+  let snapping = false;
+
+  // ===== Sim =====
+  const sim = {
+    running: false, speedKmh: 5, durationMin: 30, loop: true, mult: 1,
+    dense: null, dist: 0, elapsedSim: 0, nextFlushSim: 60,
+    walkedPts: [], flushedSteps: 0, batches: [], sessionStartReal: 0, timer: null
+  };
+
+  function haversine(a, b) {
+    const R = 6371000, toR = Math.PI / 180;
+    const dLat = (b[0] - a[0]) * toR, dLon = (b[1] - a[1]) * toR;
+    const h = Math.sin(dLat/2)**2 + Math.cos(a[0]*toR)*Math.cos(b[0]*toR)*Math.sin(dLon/2)**2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+
+  // Nội suy dense polyline ~10m/đoạn (mirror RouteSimulator.kt)
+  function buildDense(wps) {
+    const pts = [], cum = []; let acc = 0;
+    if (wps.length === 0) return { pts, cum, total: 0 };
+    pts.push(wps[0]); cum.push(0);
+    for (let i = 1; i < wps.length; i++) {
+      const a = wps[i-1], b = wps[i];
+      const seg = haversine(a, b);
+      const n = Math.max(1, Math.ceil(seg / 10));
+      for (let j = 1; j <= n; j++) {
+        const t = j / n;
+        pts.push([a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t]);
+        acc += seg / n;
+        cum.push(acc);
+      }
+    }
+    return { pts, cum, total: acc };
+  }
+
+  function positionAt(dense, d) {
+    if (!dense.pts.length) return null;
+    const dd = Math.max(0, Math.min(d, dense.total));
+    let lo = 0, hi = dense.cum.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; dense.cum[mid] < dd ? lo = mid + 1 : hi = mid; }
+    if (lo === 0) return dense.pts[0];
+    const d0 = dense.cum[lo-1], d1 = dense.cum[lo];
+    const t = d1 > d0 ? (dd - d0) / (d1 - d0) : 0;
+    const a = dense.pts[lo-1], b = dense.pts[lo];
+    return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t];
+  }
+
+  // ===== Waypoint UI =====
+  async function addWaypoint(lat, lng) {
+    waypoints.push([lat, lng]);
+    await snapRoute();
+  }
+
+  // Gọi OSRM (chế độ foot) để lộ trình bám theo đường phố cho người đi bộ,
+  // thay vì nối thẳng tọa độ (sẽ "bơi" qua hồ/sông/nhà)
+  async function snapRoute() {
+    if (snapping || waypoints.length < 2) { redraw(); return; }
+    snapping = true;
+    redraw();
+    try {
+      const coords = waypoints.map(w => w[1].toFixed(6) + "," + w[0].toFixed(6)).join(";");
+      const resp = await fetch(
+        `https://router.project-osrm.org/route/v1/foot/${coords}?overview=full&geometries=geojson`
+      );
+      const json = await resp.json();
+      if (json.code === "Ok" && json.routes?.[0]?.geometry?.coordinates?.length > 1) {
+        streetRoute = json.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+        routeDistance = json.routes[0].distance;
+      } else {
+        streetRoute = null;
+        routeDistance = 0;
+        setStatus("⚠ OSRM không tìm được đường đi bộ giữa các điểm — đang nối thẳng (có thể qua hồ)");
+      }
+    } catch (e) {
+      streetRoute = null;
+      routeDistance = 0;
+      setStatus("⚠ Không gọi được OSRM (mạng) — đang nối thẳng");
+    }
+    snapping = false;
+    redraw();
+  }
+  function removeLast() { if (waypoints.length) { waypoints.pop(); snapRoute(); } }
+  function clearAll() { waypoints = []; streetRoute = null; routeDistance = 0; redraw(); }
+
+  function redraw() {
+    if (plannedLine) { plannedLine.remove(); plannedLine = null; }
+    markersLayer.clearLayers();
+    if (waypoints.length) {
+      // Vẽ tuyến đường bộ (đường liền) nếu đã snap, không thì nối thẳng (đứt nét)
+      const pts = streetRoute || waypoints;
+      plannedLine = L.polyline(pts, {
+        color: "#0a84ff", weight: 4,
+        dashArray: streetRoute ? null : "7 7",
+        opacity: .85
+      }).addTo(map);
+      waypoints.forEach((wp, i) => {
+        L.marker(wp, {
+          draggable: true,
+          autoPan: true,
+          icon: L.divIcon({
+            className: "wp-pin",
+            html: '<div class="wp-pin-dot"><span>' + (i+1) + '</span></div>',
+            iconSize: [26, 26],
+            iconAnchor: [13, 13]
+          })
+        })
+          .bindTooltip("Kéo để di chuyển điểm " + (i+1), { permanent: false })
+          .on("dragstart", () => { document.getElementById("v-status").textContent = "✋ Đang kéo điểm " + (i+1) + "…"; })
+          .on("drag", (e) => {
+            // Cập nhật realtime trong khi kéo: đường đứt nét bám theo tay (dùng e.target, không dùng biến chung)
+            const p = e.target.getLatLng();
+            waypoints[i] = [p.lat, p.lng];
+            if (plannedLine) plannedLine.setLatLngs(streetRoute || waypoints);
+          })
+          .on("dragend", async (e) => {
+            const p = e.target.getLatLng();
+            waypoints[i] = [p.lat, p.lng];
+            await snapRoute(); // tự tìm lại đường bộ từ vị trí mới
+            if (sim.running) {
+              // đang chạy: đi tiếp trên lộ trình mới từ vị trí gần nhất
+              sim.dense = buildDense(streetRoute || waypoints);
+              sim.dist = Math.min(sim.dist, sim.dense.total);
+            }
+          })
+          .addTo(markersLayer);
+      });
+    }
+    document.getElementById("wp-count").textContent =
+      waypoints.length + " điểm" + (routeDistance > 0 ? " — " + (routeDistance >= 1000 ? (routeDistance/1000).toFixed(2) + " km" : Math.round(routeDistance) + " m") + " (đường bộ)" : "");
+  }
+
+  map.on("click", e => addWaypoint(e.latlng.lat, e.latlng.lng));
+  map.on("contextmenu", () => removeLast());
+  document.getElementById("btn-undo").onclick = removeLast;
+  document.getElementById("btn-clear").onclick = clearAll;
+
+  // ===== Controls =====
+  const elSpeed = document.getElementById("s-speed"), elDur = document.getElementById("s-dur"),
+        elMult = document.getElementById("s-mult"), elLoop = document.getElementById("s-loop");
+  elSpeed.oninput = () => { sim.speedKmh = parseFloat(elSpeed.value); document.getElementById("v-speed").textContent = sim.speedKmh.toFixed(1); };
+  elDur.oninput = () => { sim.durationMin = parseInt(elDur.value, 10); document.getElementById("v-dur").textContent = sim.durationMin; };
+  elMult.onchange = () => { sim.mult = parseInt(elMult.value, 10); };
+  elLoop.onchange = () => { sim.loop = elLoop.checked; };
+
+  // ===== Walk loop =====
+  function start() {
+    if (waypoints.length < 2) { setStatus("⚠ Cần ít nhất 2 điểm trên bản đồ"); return; }
+    if (snapping) { setStatus("⚠ Đang tìm đường bộ (OSRM)… thử lại sau 1 giây"); return; }
+    // Ưu tiên tuyến đường bộ từ OSRM; chưa snap thì fallback nối thẳng + cảnh báo
+    const routePts = streetRoute || waypoints;
+    if (!streetRoute) setStatus("⚠ Chưa snap được đường bộ — đang đi theo đường chim bay (có thể qua hồ)");
+
+    sim.running = true;
+    sim.dense = buildDense(routePts);
+    sim.dist = 0; sim.elapsedSim = 0; sim.nextFlushSim = 60;
+    sim.walkedPts = [routePts[0].slice()];
+    sim.flushedSteps = 0; sim.batches = [];
+    sim.sessionStartReal = Date.now();
+    renderBatches();
+
+    if (walkedLine) walkedLine.remove();
+    walkedLine = L.polyline(sim.walkedPts, { color: "#ff9500", weight: 5, opacity: .9 }).addTo(map);
+    if (!walker) walker = L.circleMarker(routePts[0], { radius: 9, color: "#fff", fillColor: "#30d158", fillOpacity: 1, weight: 3 }).addTo(map);
+
+    setStatus("Đang giả lập đi bộ — đang đẩy vị trí vào GPS (mock)…");
+    setButtons();
+    map.fitBounds(plannedLine.getBounds(), { padding: [40, 40] });
+
+    sim.timer = setInterval(tick, 500);
+    tick();
+  }
+
+  function stop() {
+    if (!sim.running) return;
+    clearInterval(sim.timer); sim.timer = null;
+    sim.running = false;
+    flushBatch(true);
+    setStatus("Đã dừng — tổng " + fmt(Math.round(stepsNow())) + " bước");
+    setButtons();
+  }
+
+  function stepsNow() { return sim.dist / 0.72; }
+
+  function tick() {
+    const dt = 0.5 * sim.mult; // giây mô phỏng
+    sim.elapsedSim += dt;
+    if (sim.elapsedSim >= sim.durationMin * 60) { stop(); return; }
+
+    sim.dist += (sim.speedKmh / 3.6) * dt;
+    const total = sim.dense.total;
+    if (!sim.loop && sim.dist >= total) { sim.dist = total; renderOnce(); stop(); return; }
+
+    renderOnce();
+
+    if (sim.elapsedSim >= sim.nextFlushSim) { flushBatch(false); sim.nextFlushSim += 60; }
+  }
+
+  function renderOnce() {
+    const total = sim.dense.total;
+    const d = sim.loop && total > 0 ? sim.dist % total : Math.min(sim.dist, total);
+    const pos = positionAt(sim.dense, d);
+    if (!pos) return;
+
+    walker.setLatLng(pos);
+    const last = sim.walkedPts[sim.walkedPts.length - 1];
+    if (!last || haversine(last, pos) > 8) { // chấm dày vừa đủ, tránh phình DOM
+      sim.walkedPts.push(pos);
+      walkedLine.setLatLngs(sim.walkedPts);
+    }
+    if (sim.loop && total > 0 && d < 20 && sim.walkedPts.length > 2) {
+      // vừa loop về đầu — bắt đầu đường đã đi mới
+      sim.walkedPts = [pos];
+      walkedLine.setLatLngs(sim.walkedPts);
+    }
+
+    // stats
+    const m = Math.floor(sim.elapsedSim / 60), s = Math.floor(sim.elapsedSim % 60);
+    document.getElementById("st-time").textContent = String(m).padStart(2,"0") + ":" + String(s).padStart(2,"0");
+    document.getElementById("st-dist").textContent = sim.dist >= 1000 ? (sim.dist/1000).toFixed(2) + " km" : Math.round(sim.dist) + " m";
+    document.getElementById("st-steps").textContent = fmt(Math.round(stepsNow()));
+    document.getElementById("st-loc").textContent = pos[0].toFixed(5) + ", " + pos[1].toFixed(5);
+  }
+
+  function flushBatch(final) {
+    const steps = Math.round(stepsNow());
+    const delta = steps - sim.flushedSteps;
+    if (delta <= 0) return;
+    const t = new Date(sim.sessionStartReal + sim.elapsedSim * 1000);
+    sim.batches.push({
+      i: sim.batches.length + 1,
+      count: delta,
+      time: t.toLocaleTimeString("vi-VN"),
+      dur: final ? "cuối phiên" : "60s mô phỏng"
+    });
+    sim.flushedSteps = steps;
+    renderBatches();
+  }
+
+  function renderBatches() {
+    const wrap = document.getElementById("batch-wrap");
+    if (!sim.batches.length) { wrap.innerHTML = '<div class="empty">Chưa có lần ghi nào</div>'; return; }
+    const rows = sim.batches.slice(-8).map(b =>
+      `<tr><td>${b.i}</td><td>${fmt(b.count)}</td><td>${b.time}</td><td>${b.dur}</td></tr>`).join("");
+    wrap.innerHTML = `<table><thead><tr><th>#</th><th>Số bước</th><th>Thời điểm ghi</th><th>Độ dài lô</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  function setStatus(msg) { document.getElementById("v-status").textContent = msg; }
+  function setButtons() {
+    document.getElementById("btn-start").disabled = sim.running;
+    document.getElementById("btn-stop").disabled = !sim.running;
+  }
+  function fmt(n) { return n.toLocaleString("vi-VN"); }
+
+  document.getElementById("btn-start").onclick = start;
+  document.getElementById("btn-stop").onclick = stop;
+
+  // Debug hook (dùng cho test tự động)
+  window.demoAddWaypoint = (lat, lng) => addWaypoint(lat, lng);
+  window.demoStart = start;
+  window.demoState = () => ({ running: sim.running, dist: Math.round(sim.dist), steps: Math.round(stepsNow()), elapsed: Math.round(sim.elapsedSim), batches: sim.batches.length });
+  window.demoGetMarkers = () => markersLayer.getLayers();
+  window.demoSetWaypoint = (i, lat, lng) => { waypoints[i] = [lat, lng]; return snapRoute(); };
+}
+</script>
+</body>
+</html>
